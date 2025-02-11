@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Datumtransponering schema</title>
+  <!-- Inkludera SheetJS (för att läsa in XLS) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2em;
+      background-color: #f7f7f7;
+    }
+    h1, h2 {
+      color: #2c3e50;
+    }
+    pre {
+      background-color: #ecf0f1;
+      padding: 8px;
+      border-radius: 4px;
+    }
+    textarea {
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 8px;
+      box-sizing: border-box;
+      background-color: #fff;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="date"] {
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 8px;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      padding: 6px 12px;
+      font-size: 14px;
+      margin-right: 4px;
+      margin-top: 4px;
+      border: none;
+      border-radius: 5px;
+      background-color: #3498db;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #2980b9;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 1em;
+      background-color: #ffffff;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .field-group {
+      margin-top: 10px;
+    }
+    .transposedDate {
+      cursor: pointer;
+      text-decoration: underline;
+      color: #e67e22;
+    }
+    .grouped {
+      background-color: #ffffcc; /* Ljusgul bakgrund för grupperade rader */
+    }
+    .row-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .row-container input.rowSelector {
+      margin-right: 5px;
+    }
+    /* Ny sektion för planering/redigering */
+    .planning-section {
+      background-color: #e8f4fc;
+      padding: 15px;
+      border: 1px solid #bcdff1;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    .footer {
+      margin-top: 20px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+      font-size: 12px;
+      text-align: center;
+      color: #666;
+    }
+    .footer a {
+      color: #3498db;
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h1>Datumtransponering Schema</h1>
+  
+  <!-- Importera TimeEdit XLS-schema -->
+  <h2>Importera TimeEdit XLS schema</h2>
+  <label for="fileInput">Välj en TimeEdit XLS‑fil:</label>
+  <input type="file" id="fileInput" accept=".xls,.xlsx">
+  <button onclick="parseTimeEditFile()">Importera schema</button>
+  <p>Resultatet från importen fylls automatiskt i indatafältet nedan. Du kan även redigera fältet manuellt.</p>
+  
+  <!-- Indata -->
+  <p>Schemahändelser (format: <code>YYYY-MM-DD, tid, lokal, typ, lärare</code>):</p>
+  <pre>
+2024-01-16, 09:00-12:00, L21, Föreläsning, Efternamn Förnamn
+2024-01-18, 13:00-15:00, L21, Föreläsning, Efternamn Förnamn
+
+  </pre>
+  <textarea id="inputDates" placeholder="2024-01-16, 09:00-12:00, L21, Föreläsning, lärare" style="height:150px;"></textarea>
+  
+  <label for="targetYear"><strong>Nytt år</strong> (t.ex. 2025):</label>
+  <input type="number" id="targetYear" placeholder="2025">
+  
+  <button onclick="transposeDates()">Transponera datum</button>
+  
+  <!-- Planeringssektion: Förskjut schema, interaktiv utmatning, gruppering, ändra lärarnamn -->
+  <div class="planning-section">
+    <h2>Planering</h2>
+    
+    <!-- Schemaförskjutning -->
+    <h3>Förskjut schema</h3>
+    <p>Justera veckoförskjutningen för hela schemat:</p>
+    <button onclick="shiftSchedule(-1)">Skifta tidigare (-1 vecka)</button>
+    <button onclick="shiftSchedule(1)">Skifta senare (+1 vecka)</button>
+    <p>Aktuell förskjutning: <span id="offsetDisplay">0</span> vecka</p>
+    
+    <!-- Interaktiv utmatning -->
+    <h3>Transponerat schema (klicka på datumet för att ändra det)</h3>
+    <div class="result" id="result"></div>
+    
+    <!-- Gruppering -->
+    <button onclick="groupSelected()">Gruppmarkera valda</button>
+    <button onclick="ungroupSelected()">Avgruppera valda</button>
+    
+    <!-- Radera lokalnamn -->
+    <button onclick="raderaLokalnamn()">Radera lokalnamn</button>
+    
+    <!-- Ändra lärarnamn -->
+    <div class="field-group">
+      <label for="teacherNameInput"><strong>Nytt lärarnamn:</strong></label>
+      <input type="text" id="teacherNameInput" placeholder="Ange nytt lärarnamn">
+      <button onclick="updateTeacherName()">Ändra</button>
+    </div>
+  </div>
+  <!-- Slut på planeringssektionen -->
+  
+  <!-- Exportalternativ för schemaobjekt -->
+  <h2>Exportera schemaobjekt</h2>
+  <div class="field-group">
+    <button onclick="exportSchemaCSV()">Exportera till CSV</button>
+    <button onclick="exportToICal()">Exportera till iCal</button>
+  </div>
+  
+  <!-- Schemaläggningsunderlag för copy-paste -->
+  <h2>Schemaunderlag (för copy-paste)</h2>
+  <div class="field-group">
+    <button onclick="generateSchemaunderlag()">Generera schemaunderlag</button>
+  </div>
+  <textarea id="copyOutput" placeholder="Schemaläggningsunderlag" style="width:100%; height:200px; margin-top:10px;"></textarea>
+  
+  <div class="footer">
+    Datumtransponeraren är skapad av <a href="http://www.giselabacklander.se" target="_blank">Gisela Bäcklander</a> med hjälp av ChatGPT 2025.
+  </div>
+
+
+  <script>
+    // Global variabel för schemaförskjutning
+    let shiftOffsetWeeks = 0;
+    // Global array: varje objekt i linesData: { originalDate, tag, computedDate, overrideDate, holiday, groupId }
+    let linesData = [];
+    
+    // Uppdatera visningen av veckoförskjutning
+    function updateShiftDisplay() {
+      document.getElementById("offsetDisplay").innerText = shiftOffsetWeeks;
+    }
+    
+    // Ändra veckoförskjutning och transponera
+    function shiftSchedule(change) {
+      shiftOffsetWeeks += change;
+      updateShiftDisplay();
+      if(document.getElementById("inputDates").value.trim() !== ""){
+        transposeDates();
+      }
+    }
+    
+    // Läs in och parsa TimeEdit XLS-fil
+    function parseTimeEditFile() {
+      const fileInput = document.getElementById("fileInput");
+      if(!fileInput.files || fileInput.files.length === 0){
+        alert("Vänligen välj en fil.");
+        return;
+      }
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = e.target.result;
+        const workbook = XLSX.read(data, {type: "binary"});
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+        let headerRowIndex = -1;
+        for(let i = 0; i < rows.length; i++){
+          if(rows[i] && rows[i].indexOf("Startdatum") !== -1){
+            headerRowIndex = i;
+            break;
+          }
+        }
+        if(headerRowIndex === -1){
+          alert("Kunde inte hitta headern i filen.");
+          return;
+        }
+        const header = rows[headerRowIndex];
+        const startdatumIndex = header.indexOf("Startdatum");
+        const kurstillfalleIndex = header.indexOf("Kurstillfälle");
+        const kursIndex = header.indexOf("Kurs");
+        const helgNamn = [
+          "Nyårsdagen", "Trettondagsafton", "Trettondedag jul",
+          "Skärtorsdag", "Långfredag", "Påskafton", "Påskdagen",
+          "Annandag påsk", "Valborgsmässoafton", "Första maj",
+          "Kristi himmelsfärdsdag", "Pingstafton", "Pingstdagen",
+          "Sveriges nationaldag"
+        ];
+        let outputLines = [];
+        for(let i = headerRowIndex+1; i < rows.length; i++){
+          const row = rows[i];
+          if(!row || row.length === 0) continue;
+          const startdatumVal = row[startdatumIndex] ? row[startdatumIndex].toString().trim() : "";
+          const kurstillfalleVal = row[kurstillfalleIndex] ? row[kurstillfalleIndex].toString().trim() : "";
+          const kursVal = (kursIndex !== -1 && row[kursIndex]) ? row[kursIndex].toString().trim() : "";
+          if(!startdatumVal) continue;
+          if(!kursVal && helgNamn.includes(kurstillfalleVal)){
+            continue;
+          }
+          const starttidIndex = header.indexOf("Starttid");
+          const sluttidIndex = header.indexOf("Sluttid");
+          const lokalIndex = header.indexOf("Lokal");
+          const typIndex = header.indexOf("Typ");
+          const larareIndex = header.indexOf("Lärare");
+          const meetingsUrlIndex = header.indexOf("Mötes URL");
+          let extraInfoIndex = -1;
+          if(meetingsUrlIndex !== -1 && meetingsUrlIndex + 1 < header.length){
+             extraInfoIndex = meetingsUrlIndex + 1;
+          }
+          const starttidVal = row[starttidIndex] ? row[starttidIndex].toString().trim() : "";
+          const sluttidVal = row[sluttidIndex] ? row[sluttidIndex].toString().trim() : "";
+          const lokalVal = row[lokalIndex] ? row[lokalIndex].toString().trim() : "";
+          const typVal = row[typIndex] ? row[typIndex].toString().trim() : "";
+          let extraVal = "";
+          if(extraInfoIndex !== -1 && extraInfoIndex < row.length){
+            extraVal = row[extraInfoIndex] ? row[extraInfoIndex].toString().trim() : "";
+          }
+          const larareVal = (larareIndex !== -1 && row[larareIndex]) ? row[larareIndex].toString().trim() : "";
+          let labelParts = [];
+          let timeLabel = "";
+          if(starttidVal && sluttidVal){
+            timeLabel = `${starttidVal}-${sluttidVal}`;
+          } else if(starttidVal){
+            timeLabel = starttidVal;
+          } else if(sluttidVal){
+            timeLabel = sluttidVal;
+          }
+          if(timeLabel) labelParts.push(timeLabel);
+          if(lokalVal) labelParts.push(lokalVal);
+          if(typVal) labelParts.push(typVal);
+          if(extraVal) labelParts.push(extraVal);
+          if(larareVal) labelParts.push(larareVal);
+          outputLines.push(`${startdatumVal}, ${labelParts.join(", ")}`);
+        }
+        document.getElementById("inputDates").value = outputLines.join("\n");
+      };
+      reader.readAsBinaryString(file);
+    }
+    
+    // --- Funktioner för datumtransponering ---
+    function getISOWeek(date) {
+      const d = new Date(date.getTime());
+      const dayNum = (d.getDay() + 6) % 7 + 1;
+      d.setDate(d.getDate() + 4 - dayNum);
+      const yearStart = new Date(d.getFullYear(), 0, 1);
+      const diffInDays = (d - yearStart) / 86400000;
+      return Math.ceil((diffInDays + 1) / 7);
+    }
+    
+    function getISODay(date) {
+      return (date.getDay() + 6) % 7 + 1;
+    }
+    
+    function getDateFromISOWeek(week, year, isoDay) {
+      const jan4 = new Date(year, 0, 4);
+      const dayOfWeek = getISODay(jan4);
+      const mondayOfWeek1 = new Date(jan4);
+      mondayOfWeek1.setDate(jan4.getDate() - (dayOfWeek - 1));
+      const result = new Date(mondayOfWeek1);
+      result.setDate(mondayOfWeek1.getDate() + (week - 1) * 7 + (isoDay - 1));
+      return result;
+    }
+    
+    function formatDate(date) {
+      const year = date.getFullYear();
+      const month = ("0" + (date.getMonth() + 1)).slice(-2);
+      const day = ("0" + date.getDate()).slice(-2);
+      return `${year}-${month}-${day}`;
+    }
+    
+    // Vi använder formatDate() även för Excel (där formatet är YYYY-MM-DD)
+    function formatDateForExcel(date) {
+      return formatDate(date);
+    }
+    
+    // Beräkna påskdagen (algoritm)
+    function calculateEaster(year) {
+      const a = year % 19;
+      const b = Math.floor(year / 100);
+      const c = year % 100;
+      const d = Math.floor(b / 4);
+      const e = b % 4;
+      const f = Math.floor((b + 8) / 25);
+      const g = Math.floor((b - f + 1) / 3);
+      const h = (19 * a + b - d - g + 15) % 30;
+      const i = Math.floor(c / 4);
+      const k = c % 4;
+      const l = (32 + 2 * e + 2 * i - h - k) % 7;
+      const m = Math.floor((a + 11 * h + 22 * l) / 451);
+      const month = Math.floor((h + l - 7 * m + 114) / 31);
+      const day = ((h + l - 7 * m + 114) % 31) + 1;
+      return new Date(year, month - 1, day);
+    }
+    
+    // Returnera en lista över svenska röda dagar för ett givet år
+    function getSwedishHolidays(year) {
+      let holidays = {};
+      let d = new Date(year, 0, 1);
+      holidays[formatDate(d)] = "Nyårsdagen";
+      d = new Date(year, 0, 6);
+      holidays[formatDate(d)] = "Trettondedag jul";
+      let easter = calculateEaster(year);
+      let goodFriday = new Date(easter);
+      goodFriday.setDate(goodFriday.getDate() - 2);
+      holidays[formatDate(goodFriday)] = "Långfredagen";
+      holidays[formatDate(easter)] = "Påskdagen";
+      let easterMonday = new Date(easter);
+      easterMonday.setDate(easterMonday.getDate() + 1);
+      holidays[formatDate(easterMonday)] = "Annandag påsk";
+      let ascension = new Date(easter);
+      ascension.setDate(ascension.getDate() + 39);
+      holidays[formatDate(ascension)] = "Kristi himmelsfärdsdag";
+      let pentecost = new Date(easter);
+      pentecost.setDate(pentecost.getDate() + 49);
+      holidays[formatDate(pentecost)] = "Pingstdagen";
+      d = new Date(year, 5, 6);
+      holidays[formatDate(d)] = "Nationaldagen";
+      let midsommarAfton = null;
+      for(let i = 19; i <= 25; i++){
+         let temp = new Date(year, 5, i);
+         if(temp.getDay() === 5){ midsommarAfton = temp; break; }
+      }
+      if(midsommarAfton){
+         let midsommardagen = new Date(midsommarAfton);
+         midsommardagen.setDate(midsommardagen.getDate() + 1);
+         holidays[formatDate(midsommardagen)] = "Midsommardagen";
+      }
+      let allSaints = null;
+      for(let i = 31; i <= 37; i++){
+         let temp = new Date(year, 9, i);
+         if(temp.getDay() === 6){ allSaints = temp; break; }
+      }
+      if(allSaints){
+         holidays[formatDate(allSaints)] = "Alla helgons dag";
+      }
+      d = new Date(year, 11, 25);
+      holidays[formatDate(d)] = "Juldagen";
+      d = new Date(year, 11, 26);
+      holidays[formatDate(d)] = "Annandag jul";
+      return holidays;
+    }
+    
+    // --- INTERAKTIV UTMATNING MED INLINE-REDIGERING OCH GRUPPERING ---
+    // Varje objekt i linesData: { originalDate, tag, computedDate, overrideDate, holiday, groupId }
+    function transposeDates() {
+      const input = document.getElementById("inputDates").value.trim();
+      const targetYear = parseInt(document.getElementById("targetYear").value);
+      if(!input || isNaN(targetYear)){
+         alert("Please enter valid dates and a target year.");
+         return;
+      }
+      const holidayMapping = getSwedishHolidays(targetYear);
+      linesData = []; // töm arrayen
+      const lines = input.split("\n");
+      lines.forEach(line => {
+         if(!line.trim()) return;
+         const parts = line.split(",");
+         const originalDateStr = parts[0].trim();
+         const tag = parts.slice(1).join(",").trim();
+         const originalDate = new Date(originalDateStr);
+         if(isNaN(originalDate.getTime())) return;
+         const weekNo = getISOWeek(originalDate);
+         const isoDay = getISODay(originalDate);
+         let computedDate = getDateFromISOWeek(weekNo, targetYear, isoDay);
+         computedDate.setDate(computedDate.getDate() + (shiftOffsetWeeks * 7));
+         let holidayName = holidayMapping[formatDate(computedDate)] || "";
+         linesData.push({
+           originalDate: originalDate,
+           tag: tag,
+           computedDate: computedDate,
+           overrideDate: null,
+           holiday: holidayName,
+           groupId: null
+         });
+      });
+      renderInteractiveOutput();
+    }
+    
+    // Rendera interaktiv utmatning med checkboxar och inline-datepicker
+    function renderInteractiveOutput() {
+      const resultDiv = document.getElementById("result");
+      resultDiv.innerHTML = "";
+      const targetYear = parseInt(document.getElementById("targetYear").value);
+      const holidayMapping = getSwedishHolidays(targetYear);
+      linesData.forEach((lineObj, index) => {
+         const container = document.createElement("div");
+         container.className = "row-container";
+         // Checkbox för gruppering
+         const checkbox = document.createElement("input");
+         checkbox.type = "checkbox";
+         checkbox.className = "rowSelector";
+         checkbox.setAttribute("data-index", index);
+         container.appendChild(checkbox);
+         
+         const div = document.createElement("div");
+         if(lineObj.groupId) { div.classList.add("grouped"); }
+         let lineText = formatDate(lineObj.originalDate);
+         if(lineObj.tag) {
+           lineText += " (" + lineObj.tag + ")";
+         }
+         lineText += " → ";
+         const dateSpan = document.createElement("span");
+         dateSpan.className = "transposedDate";
+         dateSpan.setAttribute("data-index", index);
+         const displayDate = lineObj.overrideDate ? lineObj.overrideDate : lineObj.computedDate;
+         const weekday = getWeekdayName(displayDate);
+         dateSpan.innerText = formatDate(displayDate) + " (" + weekday + ")";
+         dateSpan.onclick = function() { editDate(this); };
+         div.appendChild(document.createTextNode(lineText));
+         div.appendChild(dateSpan);
+         const holidayName = holidayMapping[formatDate(displayDate)] || "";
+         if(holidayName) {
+           div.appendChild(document.createTextNode(" [helgdag: " + holidayName + "]"));
+           div.style.color = "red";
+         }
+         container.appendChild(div);
+         resultDiv.appendChild(container);
+      });
+    }
+    
+    function getWeekdayName(date) {
+      const dayNames = ["Söndag", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag"];
+      return dayNames[date.getDay()];
+    }
+    
+    // Vid klick – ersätt datumtext med en datepicker
+    function editDate(spanElement) {
+      const index = parseInt(spanElement.getAttribute("data-index"));
+      const currentDate = linesData[index].overrideDate ? linesData[index].overrideDate : linesData[index].computedDate;
+      const input = document.createElement("input");
+      input.type = "date";
+      input.value = formatDate(currentDate);
+      input.onblur = function() { saveEditedDate(index, input.value); };
+      input.onchange = function() { saveEditedDate(index, input.value); };
+      spanElement.parentNode.replaceChild(input, spanElement);
+      input.focus();
+    }
+    
+    // Spara manuellt ändrat datum; om raden är grupperad, applicera offset på hela gruppen
+    function saveEditedDate(index, newDateStr) {
+      const newDate = new Date(newDateStr);
+      if(isNaN(newDate.getTime())){
+         alert("Ogiltigt datum.");
+         return;
+      }
+      if(linesData[index].groupId) {
+         const offset = newDate.getTime() - linesData[index].computedDate.getTime();
+         linesData.forEach(row => {
+           if(row.groupId === linesData[index].groupId) {
+             row.overrideDate = new Date(row.computedDate.getTime() + offset);
+             const targetYear = parseInt(document.getElementById("targetYear").value);
+             const holidayMapping = getSwedishHolidays(targetYear);
+             row.holiday = holidayMapping[formatDate(row.overrideDate)] || "";
+           }
+         });
+      } else {
+         linesData[index].overrideDate = newDate;
+         const targetYear = parseInt(document.getElementById("targetYear").value);
+         const holidayMapping = getSwedishHolidays(targetYear);
+         linesData[index].holiday = holidayMapping[formatDate(newDate)] || "";
+      }
+      renderInteractiveOutput();
+    }
+    
+    // Gruppmarkera valda: tilldela ett gemensamt groupId
+    function groupSelected() {
+      const checkboxes = document.querySelectorAll(".rowSelector:checked");
+      if(checkboxes.length === 0){
+         alert("Markera de rader du vill gruppera.");
+         return;
+      }
+      const newGroupId = "group_" + Date.now();
+      checkboxes.forEach(cb => {
+         const index = parseInt(cb.getAttribute("data-index"));
+         linesData[index].groupId = newGroupId;
+      });
+      renderInteractiveOutput();
+    }
+    
+    // Avgruppera valda: ta bort groupId
+    function ungroupSelected() {
+      const checkboxes = document.querySelectorAll(".rowSelector:checked");
+      if(checkboxes.length === 0){
+         alert("Markera de rader du vill avgruppera.");
+         return;
+      }
+      checkboxes.forEach(cb => {
+         const index = parseInt(cb.getAttribute("data-index"));
+         linesData[index].groupId = null;
+      });
+      renderInteractiveOutput();
+    }
+    
+    // Radera lokalnamn i taggen
+    function raderaLokalnamn() {
+      linesData.forEach(lineObj => {
+         if(lineObj.tag){
+           let parts = lineObj.tag.split(",").map(s => s.trim());
+           if(parts.length >= 2){
+             parts[1] = "<lokal>";
+             lineObj.tag = parts.join(", ");
+           }
+         }
+      });
+      renderInteractiveOutput();
+    }
+    
+    // Ändra lärarnamn i taggen
+    function updateTeacherName() {
+      const newTeacherName = document.getElementById("teacherNameInput").value.trim();
+      if(!newTeacherName){
+         alert("Skriv in ett nytt lärarnamn.");
+         return;
+      }
+      linesData.forEach(lineObj => {
+         if(lineObj.tag){
+           let parts = lineObj.tag.split(",").map(s => s.trim());
+           if(parts.length > 0){
+             parts[parts.length - 1] = newTeacherName;
+             lineObj.tag = parts.join(", ");
+           }
+         }
+      });
+      renderInteractiveOutput();
+    }
+    
+    // --- Generera schemaunderlag (för copy-paste) ---
+    // Skapar en tab-separerad text med kolumner: Vecka, Datum, Starttid, Sluttid, Lokal, Typ, Lärare
+    function generateSchemaunderlag() {
+      let output = "Vecka\tDatum\tStarttid\tSluttid\tLokal\tTyp\tLärare\n";
+      linesData.forEach(lineObj => {
+         const finalDate = lineObj.overrideDate ? lineObj.overrideDate : lineObj.computedDate;
+         const weekNo = getISOWeek(finalDate);
+         const formattedDate = formatDate(finalDate);
+         let parts = lineObj.tag.split(",").map(s => s.trim());
+         let starttid = "", sluttid = "", lokal = "", typ = "", larare = "";
+         if(parts.length > 0) {
+           let timeParts = parts[0].split("-").map(s => s.trim());
+           starttid = timeParts[0] || "";
+           sluttid = timeParts.length > 1 ? timeParts[1] : "";
+         }
+         if(parts.length >= 2) { lokal = parts[1]; }
+         if(parts.length >= 3) { typ = parts[2]; }
+         if(parts.length >= 4) { larare = parts[parts.length - 1]; }
+         output += weekNo + "\t" + formattedDate + "\t" + starttid + "\t" + sluttid + "\t" + lokal + "\t" + typ + "\t" + larare + "\n";
+      });
+      document.getElementById("copyOutput").value = output;
+    }
+    
+    // --- Exportera schemaobjekt till CSV ---
+    // Skapar en CSV-sträng med kolumner: Vecka, Final Datum, Starttid, Sluttid, Lokal, Typ, Lärare, Övrigt, GroupId
+    function exportSchemaCSV() {
+      let csv = "Vecka,Final Datum,Starttid,Sluttid,Lokal,Typ,Lärare,Övrigt,GroupId\n";
+      linesData.forEach(lineObj => {
+         const finalDate = lineObj.overrideDate ? lineObj.overrideDate : lineObj.computedDate;
+         const weekNo = getISOWeek(finalDate);
+         const formattedFinal = formatDate(finalDate);
+         let parts = lineObj.tag.split(",").map(s => s.trim());
+         let starttid = "", sluttid = "", lokal = "", typ = "", larare = "", ovrigt = "";
+         if(parts.length > 0) {
+           let timeParts = parts[0].split("-").map(s => s.trim());
+           starttid = timeParts[0] || "";
+           sluttid = timeParts.length > 1 ? timeParts[1] : "";
+         }
+         if(parts.length >= 2) { lokal = parts[1]; }
+         if(parts.length >= 3) { typ = parts[2]; }
+         if(parts.length === 4) {
+           larare = parts[3];
+         } else if(parts.length === 5) {
+           ovrigt = parts[3];
+           larare = parts[4];
+         } else if(parts.length > 5) {
+           larare = parts[parts.length - 1];
+           ovrigt = parts.slice(3, parts.length - 1).join(", ");
+         }
+         let groupId = lineObj.groupId ? lineObj.groupId : "";
+         // Escape dubbla citationstecken
+         larare = '"' + larare.replace(/"/g, '""') + '"';
+         ovrigt = '"' + ovrigt.replace(/"/g, '""') + '"';
+         csv += weekNo + "," + formattedFinal + "," + starttid + "," + sluttid + "," + lokal + "," + typ + "," + larare + "," + ovrigt + "," + groupId + "\n";
+      });
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "schema_export.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    
+    // --- Exportera schemaobjekt till iCal ---
+    function exportToICal() {
+      let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//MyCoursePlanner//EN\r\n";
+      linesData.forEach((lineObj, index) => {
+        const finalDate = lineObj.overrideDate ? lineObj.overrideDate : lineObj.computedDate;
+        let parts = lineObj.tag.split(",").map(s => s.trim());
+        let startTimeStr = "00:00", endTimeStr = "00:00";
+        if(parts.length > 0) {
+          let timeParts = parts[0].split("-").map(s => s.trim());
+          startTimeStr = timeParts[0] || "00:00";
+          if(timeParts.length > 1) { endTimeStr = timeParts[1]; }
+        }
+        const dtstart = formatICalDateTime(finalDate, startTimeStr);
+        const dtend = formatICalDateTime(finalDate, endTimeStr);
+        let summary = "";
+        if(parts.length >= 3) {
+          summary += parts[2];
+        }
+        if(parts.length >= 4) {
+          summary += " - " + parts[parts.length - 1];
+        }
+        let description = "";
+        if(lineObj.holiday) {
+          description = "Helgdag: " + lineObj.holiday;
+        }
+        const uid = "event-" + index + "@" + location.hostname;
+        ical += "BEGIN:VEVENT\r\n";
+        ical += "UID:" + uid + "\r\n";
+        ical += "DTSTAMP:" + getICalTimestamp(new Date()) + "\r\n";
+        ical += "DTSTART:" + dtstart + "\r\n";
+        ical += "DTEND:" + dtend + "\r\n";
+        ical += "SUMMARY:" + summary + "\r\n";
+        ical += "DESCRIPTION:" + description + "\r\n";
+        if(parts.length >= 2) {
+          ical += "LOCATION:" + parts[1] + "\r\n";
+        }
+        ical += "END:VEVENT\r\n";
+      });
+      ical += "END:VCALENDAR\r\n";
+      const blob = new Blob([ical], { type: "text/calendar;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "schema.ics";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    
+    // Hjälpfunktion för att formatera datum/tid för iCal (YYYYMMDDTHHMMSS)
+    function formatICalDateTime(date, timeStr) {
+      let [hour, minute] = timeStr.split(":");
+      hour = hour.padStart(2, "0");
+      minute = minute.padStart(2, "0");
+      const dt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), parseInt(hour), parseInt(minute), 0);
+      const YYYY = dt.getFullYear().toString();
+      const MM = (dt.getMonth() + 1).toString().padStart(2, "0");
+      const DD = dt.getDate().toString().padStart(2, "0");
+      const HH = dt.getHours().toString().padStart(2, "0");
+      const mm = dt.getMinutes().toString().padStart(2, "0");
+      const SS = dt.getSeconds().toString().padStart(2, "0");
+      return YYYY + MM + DD + "T" + HH + mm + SS;
+    }
+    
+    function getICalTimestamp(date) {
+      return formatICalDateTime(date, date.getHours() + ":" + date.getMinutes());
+    }
+    
+  </script>
+</body>
+</html>
